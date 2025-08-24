@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pixel editor</title>
+  <style>
+    :root {
+   
+      --c1: blue;
+      --c2: green;
+      --c3: cyan;
+      --c4: red;
+      --c5: magenta;
+      --c6: yellow;
+      --c7: white;
+
+      
+      --cell-size: 12px;
+    }
+
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; margin: 0; color: #eee; background: #0b0b0b; }
+
+    header { position: sticky; top: 0; z-index: 10; background: #111; border-bottom: 1px solid #222; }
+    .bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem 1rem; }
+    .section { display: flex; align-items: center; gap: .5rem; }
+    .label { font-size: .9rem; color: #bbb; }
+
+    .palette { display: grid; grid-auto-flow: column; gap: .4rem; }
+    .swatch { width: 28px; height: 28px; border-radius: .5rem; border: 2px solid #00000040; cursor: pointer; position: relative; }
+    .swatch[data-selected="true"] { outline: 3px solid #fff; }
+    .swatch[data-color="0"] { background: black; }
+    .swatch[data-color="1"] { background: var(--c1); }
+    .swatch[data-color="2"] { background: var(--c2); }
+    .swatch[data-color="3"] { background: var(--c3); }
+    .swatch[data-color="4"] { background: var(--c4); }
+    .swatch[data-color="5"] { background: var(--c5); }
+    .swatch[data-color="6"] { background: var(--c6); }
+    .swatch[data-color="7"] { background: var(--c7); color: #111; }
+
+    .hotkey { position: absolute; right: -8px; top: -8px; background: #111; color: #fff; font-size: .65rem; line-height: 1; padding: .2rem .3rem; border-radius: .35rem; }
+
+    #gridWrap { padding: 1rem; overflow: auto; }
+    #grid { 
+      display: grid; 
+      grid-template-columns: repeat(64, var(--cell-size));
+      grid-template-rows: repeat(64, var(--cell-size));
+      width: calc(64 * var(--cell-size));
+      height: calc(64 * var(--cell-size));
+      background: black; 
+      border: 1px solid #222; 
+      box-shadow: 0 1px 2px rgba(0,0,0,.2);
+      image-rendering: pixelated;
+      user-select: none;
+      touch-action: none; 
+    }
+
+    .cell { 
+      width: var(--cell-size); 
+      height: var(--cell-size); 
+      border: 1px solid #1a1a1a; 
+      background: black; 
+    }
+
+    .controls { display: flex; align-items: center; gap: .5rem; }
+    button, select, input[type="range"] { 
+      border: 1px solid #333; background: #1a1a1a; color: #f5f5f5; 
+      padding: .45rem .65rem; border-radius: .6rem; 
+      font: inherit; cursor: pointer; 
+    }
+    button:hover { background: #2a2a2a; }
+
+    textarea { width: 100%; min-height: 220px; resize: vertical; padding: .75rem; border: 1px solid #222; border-radius: .6rem; background: #111; color: #eaeaea; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 1rem; display: grid; gap: 1rem; }
+    .grid-legend { font-size: .9rem; color: #bbb; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar container">
+      <div class="section">
+        <span class="label">Color:</span>
+        <div class="palette" id="palette"></div>
+      </div>
+      <div class="section controls">
+        <label class="label" for="sizeRange">Cell size</label>
+        <input id="sizeRange" type="range" min="6" max="20" value="12" />
+      </div>
+      <div class="section controls">
+        <button id="fillBtn" title="Rellenar con el color actual">Fill</button>
+        <button id="clearBtn" title="Poner todo en 0 (negro)">Clear</button>
+        <button id="exportBtn" title="Generar matriz 64×64">Export matrix</button>
+        <button id="copyBtn" title="Copiar matriz al portapapeles">Copy</button>
+        <button id="downloadBtn" title="Descargar como .txt">Download image.mem</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="grid-legend">Atajos: teclas 0–7 para cambiar color (0 = negro/apagado). Mantén pulsado y arrastra para pintar.</div>
+    <div id="gridWrap">
+      <div id="grid" aria-label="Cuadrícula 64 por 64"></div>
+    </div>
+    <section>
+      <label class="label" for="output">Matriz (64 filas, números 0–7 separados por espacio, sin corchetes ni comas):</label>
+      <textarea id="output" spellcheck="false" placeholder="Pulsa “Exportar matriz” para generar aquí…"></textarea>
+    </section>
+  </main>
+
+  <script>
+    const SIZE = 64; // 64x64
+    const COLORS = {
+      0: "black", 
+      1: getComputedStyle(document.documentElement).getPropertyValue('--c1').trim(),
+      2: getComputedStyle(document.documentElement).getPropertyValue('--c2').trim(),
+      3: getComputedStyle(document.documentElement).getPropertyValue('--c3').trim(),
+      4: getComputedStyle(document.documentElement).getPropertyValue('--c4').trim(),
+      5: getComputedStyle(document.documentElement).getPropertyValue('--c5').trim(),
+      6: getComputedStyle(document.documentElement).getPropertyValue('--c6').trim(),
+      7: getComputedStyle(document.documentElement).getPropertyValue('--c7').trim(),
+    };
+
+   
+    const gridData = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+
+    // ====== UI: palette ======
+    const paletteEl = document.getElementById('palette');
+    let currentColor = 1; // por defecto 1 (azul)
+
+    function renderPalette() {
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i <= 7; i++) {
+        const sw = document.createElement('button');
+        sw.type = 'button';
+        sw.className = 'swatch';
+        sw.setAttribute('data-color', String(i));
+        sw.setAttribute('aria-label', `Elegir color ${i}`);
+        sw.title = i === 0 ? '0 = negro (apagar)' : String(i);
+        const k = document.createElement('span');
+        k.className = 'hotkey';
+        k.textContent = i;
+        sw.appendChild(k);
+        sw.addEventListener('click', () => setCurrentColor(i));
+        frag.appendChild(sw);
+      }
+      paletteEl.appendChild(frag);
+      updatePaletteSelection();
+    }
+
+    function setCurrentColor(i) {
+      currentColor = i;
+      updatePaletteSelection();
+    }
+
+    function updatePaletteSelection() {
+      [...paletteEl.children].forEach(btn => btn.setAttribute('data-selected', String(btn.getAttribute('data-color') == currentColor)));
+    }
+
+    renderPalette();
+
+    // ====== Construir la cuadrícula (64x64 = 4096 celdas) ======
+    const gridEl = document.getElementById('grid');
+    (function buildGrid() {
+      const frag = document.createDocumentFragment();
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          cell.dataset.r = r;
+          cell.dataset.c = c;
+          cell.style.background = COLORS[0]; // negro por defecto
+          frag.appendChild(cell);
+        }
+      }
+      gridEl.appendChild(frag);
+    })();
+
+    // ====== Pintar: click y arrastre (mouse y táctil) ======
+    let painting = false;
+
+    function paintCell(target) {
+      if (!target || !target.classList.contains('cell')) return;
+      const r = Number(target.dataset.r);
+      const c = Number(target.dataset.c);
+      gridData[r][c] = currentColor;
+      target.style.background = COLORS[currentColor];
+    }
+
+    gridEl.addEventListener('mousedown', (e) => {
+      painting = true; paintCell(e.target);
+      e.preventDefault();
+    });
+    document.addEventListener('mouseup', () => { painting = false; });
+    gridEl.addEventListener('mouseover', (e) => { if (painting) paintCell(e.target); });
+
+    // Soporte táctil
+    gridEl.addEventListener('touchstart', (e) => {
+      painting = true;
+      const t = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+      paintCell(t);
+      e.preventDefault();
+    }, { passive: false });
+    gridEl.addEventListener('touchmove', (e) => {
+      if (!painting) return;
+      const t = document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+      paintCell(t);
+      e.preventDefault();
+    }, { passive: false });
+    gridEl.addEventListener('touchend', () => { painting = false; });
+
+    // Atajos de teclado 0-7
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '7') {
+        setCurrentColor(Number(e.key));
+      }
+    });
+
+    // ====== Controles ======
+    // Tamaño de celda
+    const sizeRange = document.getElementById('sizeRange');
+    sizeRange.addEventListener('input', () => {
+      const v = sizeRange.value + 'px';
+      document.documentElement.style.setProperty('--cell-size', v);
+    });
+
+    // Rellenar todo con color actual
+    document.getElementById('fillBtn').addEventListener('click', () => {
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          gridData[r][c] = currentColor;
+        }
+      }
+      // repintar DOM de forma rápida
+      const color = COLORS[currentColor];
+      [...gridEl.children].forEach(cell => { cell.style.background = color; });
+    });
+
+    // Limpiar (todo a 0 = negro)
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      for (let r = 0; r < SIZE; r++) gridData[r].fill(0);
+      [...gridEl.children].forEach(cell => cell.style.background = COLORS[0]);
+    });
+
+    // Exportar matriz al textarea (con saltos de línea reales) 
+    const output = document.getElementById('output');
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      const lines = gridData.map(row => row.join(' ')).join('\n'); // ← \n aquí se sustituye por salto real en el textarea
+      output.value = lines;
+    });
+
+    // Copiar al portapapeles (con fallback)
+    document.getElementById('copyBtn').addEventListener('click', async () => {
+      if (!output.value) {
+        const lines = gridData.map(row => row.join(' ')).join('\n');
+        output.value = lines;
+      }
+      try {
+        await navigator.clipboard.writeText(output.value);
+        flashButton('copyBtn');
+      } catch (err) {
+        // fallback
+        output.select();
+        document.execCommand('copy');
+        flashButton('copyBtn');
+      }
+    });
+
+    // Descargar como .txt
+    document.getElementById('downloadBtn').addEventListener('click', () => {
+      if (!output.value) {
+        const lines = gridData.map(row => row.join(' ')).join('\n');
+        output.value = lines;
+      }
+      const blob = new Blob([output.value], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'image.mem';
+      document.body.appendChild(a);
+      a.click();
+      URL.revokeObjectURL(url);
+      a.remove();
+    });
+
+    function flashButton(id) {
+      const btn = document.getElementById(id);
+      const original = btn.style.backgroundColor;
+      btn.style.backgroundColor = '#064e3b';
+      setTimeout(() => { btn.style.backgroundColor = original; }, 300);
+    }
+  </script>
+</body>
+</html>
